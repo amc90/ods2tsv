@@ -8,25 +8,36 @@ do_help() {
 	done
 
 	cat <<EOF >&2
-Syntax: ods2tsv [options] <sheet> [file]
+Syntax: ods2tsv [-q -d] <sheet> [file]
+Syntax: ods2tsv [-l] [file]
 
-The input file (stdin if not specified) should be an ODS document.
-This script will print the sheet (tab delimited).
+In normal use the input file (stdin if not specified) should be an ODS 
+document. This script will print the sheet named in tab delimited form.
 
 Valid options:
 
  --quiet -q     Don't display warnings about empty/missing sheets.
+ --debug -d     Print far too much information
+ --list  -l     List all sheets (sheets per line)
 
 EOF
 	exit 2
 }
 
 QUIET=0
+DEBUG=0
+LIST=0
 while [[ "$1" = -* ]]
 do
 	case $1 in
 		-q|--quiet)
 			QUIET=1
+			;;
+		-d|--debug)
+			DEBUG=1
+			;;
+		-l|--list)
+			LIST=1
 			;;
 		-h|--help)
 			do_help
@@ -37,15 +48,6 @@ do
 	esac
 	shift
 done
-
-if [ "$#" -lt "1" -o "$#" -gt "2" ]
-then
-	do_help "Expected a sheet name, (and possibly a file name)"
-fi
-
-SHEET=$1
-INPUT="$2"
-test "$INPUT" || INPUT=/dev/stdin
 
 dump_content() {
 	if [ -e "$1" ]
@@ -66,8 +68,9 @@ dump_content() {
 	fi
 }
 
-dump_content "$INPUT"|
-	awk "-vSHEET=$SHEET" "-vQUIET=$QUIET" "-vINPUT=$INPUT" '
+normal_operation() {
+	dump_content "$INPUT"|
+		awk "-vSHEET=$SHEET" "-vQUIET=$QUIET" "-vINPUT=$INPUT" "-vDEBUG=$DEBUG" '
 /^\/@table:name=/ {
 	correct_sheet=0
 }
@@ -85,7 +88,7 @@ $0 ~ ("^/@table:name=" SHEET "$") {
 	next
 }
 
-#USEFUL DEBUG AID: {print}
+DEBUG {print}
 
 /\/table:table-row\/@table:number-rows-repeated=/ {
 	gsub("^/table:table-row/@table:number-rows-repeated=", "")
@@ -135,10 +138,11 @@ function warn(msg) {
 /^\/table:table-row\/table:table-cell\/text/ {
 	gsub ("^/table:table-row/table:table-cell/text:p=", "")
 	for(;pending_blank_cols;pending_blank_cols--) {
-		row_output=row_output "\t";
+		row_output=row_output "\t"
 	}
 	for(;col_repeat;col_repeat--) {
 		if(row_output)row_output=row_output "\t"
+		gsub("/\t/", " ")
 		row_output=row_output $0
 	}
 }
@@ -148,7 +152,28 @@ END {
 		warn("Failed to find sheet named " SHEET)
 	}
 }
-
 '
+}
 
+if [ "$LIST" -eq 1 ]
+then
+	if [ "$#" -gt "1" ]
+	then
+		do_help "Expected at most a file name"
+	fi
+
+	INPUT="$1"
+	test "$INPUT" || INPUT=/dev/stdin
+	dump_content "$INPUT"|sed '/^\/@table:name=/ {s///g;b};d'
+else
+	if [ "$#" -lt "1" -o "$#" -gt "2" ]
+	then
+		do_help "Expected a sheet name, (and possibly a file name)"
+	fi
+
+	SHEET=$1
+	INPUT="$2"
+	test "$INPUT" || INPUT=/dev/stdin
+	normal_operation
+fi
 
