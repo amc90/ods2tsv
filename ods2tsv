@@ -1,0 +1,154 @@
+#!/bin/bash
+
+do_help() {
+	while [ "$#" -gt 0 ]
+	do
+		echo "Error: $1">>/dev/stderr
+		shift
+	done
+
+	cat <<EOF >&2
+Syntax: ods2tsv [options] <sheet> [file]
+
+The input file (stdin if not specified) should be an ODS document.
+This script will print the sheet (tab delimited).
+
+Valid options:
+
+ --quiet -q     Don't display warnings about empty/missing sheets.
+
+EOF
+	exit 2
+}
+
+QUIET=0
+while [[ "$1" = -* ]]
+do
+	case $1 in
+		-q|--quiet)
+			QUIET=1
+			;;
+		-h|--help)
+			do_help
+			;;
+		*)
+			do_help "Invalid option: $1"
+			;;
+	esac
+	shift
+done
+
+if [ "$#" -lt "1" -o "$#" -gt "2" ]
+then
+	do_help "Expected a sheet name, (and possibly a file name)"
+fi
+
+SHEET=$1
+INPUT="$2"
+test "$INPUT" || INPUT=/dev/stdin
+
+dump_content() {
+	if [ -e "$1" ]
+	then
+		unzip -p "$1" content.xml|
+			xml2|
+			#We use sed just to make things a little less verbose by picking out lines we don't care about and truncating the line prefix
+			sed '/^\/office:document-content\/office:body\/office:spreadsheet\/table:table/ {s///g;b};d'
+		PIPESTATUSSAVED=( ${PIPESTATUS[*]} )
+		if [ ${PIPESTATUSSAVED[0]} -ne 0 -o ${PIPESTATUSSAVED[1]} -ne 0 -o ${PIPESTATUSSAVED[2]} -ne 0 ]
+		then
+			echo "Error processing $1. unzip status: ${PIPESTATUSSAVED[0]}, xml2 status: ${PIPESTATUSSAVED[1]}, sed status: ${PIPESTATUSSAVED[2]}">&2
+			exit 1
+		fi
+	else
+		echo "Error. File not found: $1">&2
+		exit 2
+	fi
+}
+
+dump_content "$INPUT"|
+	awk "-vSHEET=$SHEET" "-vQUIET=$QUIET" "-vINPUT=$INPUT" '
+/^\/@table:name=/ {
+	correct_sheet=0
+}
+
+$0 ~ ("^/@table:name=" SHEET "$") {
+	if((already_found_correct_sheet==1) && (!QUIET)) {
+		warn("Duplicate sheet " SHEET "?")
+	}
+	correct_sheet=1
+	already_found_correct_sheet=1
+	row_init()
+}
+
+!correct_sheet {
+	next
+}
+
+#USEFUL DEBUG AID: {print}
+
+/\/table:table-row\/@table:number-rows-repeated=/ {
+	gsub("^/table:table-row/@table:number-rows-repeated=", "")
+	row_repeat=$0
+}
+
+/^\/table:table-row\/table:table-cell$/ {
+	if(col_repeat>0) {
+		#We have unprinted (and therefore blank) cells. If it turns out there are no data cells remaining then we wont print them.
+		pending_blank_cols+=col_repeat
+	}
+	col_repeat=1
+}
+/^\/table:table-row\/table:table-cell\/@table:number-columns-repeated=/ {
+	gsub("^/table:table-row/table:table-cell/@table:number-columns-repeated=", "")
+	col_repeat=$0
+}
+
+function row_init() {
+	pending_blank_cols=0
+	row_repeat=1
+	col_repeat=1
+	row_output=""
+	sent_output=1
+}
+
+function warn(msg) {
+	print "ods2tsv: " msg " in " INPUT > "/dev/stderr"
+}
+
+/^\/table:table-row$/ {
+	#Row delimiter
+	if(row_output) {
+		for(;pending_blank_rows;pending_blank_rows--) {
+			print "";
+		}
+		for (;row_repeat;row_repeat--) {
+			printf("%s\n", row_output)
+		}
+	}else{
+		pending_blank_rows+=row_repeat;
+	}
+
+	row_init()
+}
+
+/^\/table:table-row\/table:table-cell\/text/ {
+	gsub ("^/table:table-row/table:table-cell/text:p=", "")
+	for(;pending_blank_cols;pending_blank_cols--) {
+		row_output=row_output "\t";
+	}
+	for(;col_repeat;col_repeat--) {
+		if(row_output)row_output=row_output "\t"
+		row_output=row_output $0
+	}
+}
+
+END {
+	if((already_found_correct_sheet!=1) && (!QUIET)) {
+		warn("Failed to find sheet named " SHEET)
+	}
+}
+
+'
+
+
