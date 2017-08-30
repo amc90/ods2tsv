@@ -1,5 +1,11 @@
 #!/bin/bash
 
+XML2=/usr/bin/xml2
+UNZIP=/usr/bin/unzip
+SED=/bin/sed
+#Gawk is probably necessary over plain awk
+GAWK=/usr/bin/gawk
+
 do_help() {
 	while [ "$#" -gt 0 ]
 	do
@@ -49,13 +55,24 @@ do
 	shift
 done
 
+for PROG in XML2 UNZIP SED GAWK
+do
+	PROGLC=${PROG,,}
+	test -e "${!PROG}" || declare $PROG=`which $PROGLC`
+	if [ ! -e "${!PROG}" ]
+	then
+		echo "Please set $PROG. ${!PROG} doesn't seem to be an executable file"
+	fi
+	test "$DEBUG" -eq 1 && echo $PROG is ${!PROG} >&2
+done
+
 dump_content() {
 	if [ -e "$1" ]
 	then
-		unzip -p "$1" content.xml|
-			xml2|
+		"$UNZIP" -p "$1" content.xml|
+			"$XML2"|
 			#We use sed just to make things a little less verbose by picking out lines we don't care about and truncating the line prefix
-			sed '/^\/office:document-content\/office:body\/office:spreadsheet\/table:table/ {s///g;b};d'
+			"$SED" '/^\/office:document-content\/office:body\/office:spreadsheet\/table:table/ {s///g;b};d'
 		PIPESTATUSSAVED=( ${PIPESTATUS[*]} )
 		if [ ${PIPESTATUSSAVED[0]} -ne 0 -o ${PIPESTATUSSAVED[1]} -ne 0 -o ${PIPESTATUSSAVED[2]} -ne 0 ]
 		then
@@ -164,7 +181,7 @@ then
 
 	INPUT="$1"
 	test "$INPUT" || INPUT=/dev/stdin
-	dump_content "$INPUT"|sed '/^\/@table:name=/ {s///g;b};d'
+	dump_content "$INPUT"|"$SED" '/^\/@table:name=/ {s///g;b};d'
 else
 	if [ "$#" -lt "1" -o "$#" -gt "2" ]
 	then
