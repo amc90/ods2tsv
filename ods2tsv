@@ -142,6 +142,8 @@ function warn(msg) {
 		for(;pending_blank_rows;pending_blank_rows--) {
 			print "";
 		}
+		#Each line will have a trailing tab
+		gsub(/\t+$/, "", row_output);
 		for (;row_repeat;row_repeat--) {
 			printf("%s\n", row_output)
 		}
@@ -158,9 +160,9 @@ function warn(msg) {
 		row_output=row_output "\t"
 	}
 	for(;col_repeat;col_repeat--) {
-		if(row_output)row_output=row_output "\t"
-		gsub("/\t/", " ")
-		row_output=row_output $0
+		gsub(/\t/, " ")
+		#Its easier to just remove this trailing tab for the last field!
+		row_output=row_output $0 "\t"
 	}
 }
 
