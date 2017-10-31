@@ -155,7 +155,9 @@ function warn(msg) {
 }
 
 /^\/table:table-row\/table:table-cell\/text/ {
-	gsub ("^/table:table-row/table:table-cell/text:p=", "")
+	gsub ("^/table:table-row/table:table-cell/text:p", "")
+	gsub ("^/.*", "")#Given nested tags (eg text:p/text:s) replace all with empty string
+	gsub ("^=", "")#Normal data cell. The data is left in $0
 	for(;pending_blank_cols;pending_blank_cols--) {
 		row_output=row_output "\t"
 	}
