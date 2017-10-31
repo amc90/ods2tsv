@@ -95,10 +95,11 @@ normal_operation() {
 $0 ~ ("^/@table:name=" SHEET "$") {
 	if((already_found_correct_sheet==1) && (!QUIET)) {
 		warn("Duplicate sheet " SHEET "?")
+	} else {
+		correct_sheet=1
+		already_found_correct_sheet=1
+		row_init()
 	}
-	correct_sheet=1
-	already_found_correct_sheet=1
-	row_init()
 }
 
 !correct_sheet {
@@ -112,7 +113,9 @@ DEBUG {print}
 	row_repeat=$0
 }
 
+#Start of a cell
 /^\/table:table-row\/table:table-cell$/ {
+	print_pending_cells()
 	if(col_repeat>0) {
 		#We have unprinted (and therefore blank) cells. If it turns out there are no data cells remaining then we wont print them.
 		pending_blank_cols+=col_repeat
@@ -130,14 +133,16 @@ function row_init() {
 	col_repeat=1
 	row_output=""
 	sent_output=1
+	cell_output=""
+	pending_cell_output=0
 }
 
 function warn(msg) {
 	print "ods2tsv: " msg " in " INPUT > "/dev/stderr"
 }
 
-/^\/table:table-row$/ {
-	#Row delimiter
+function print_row() {
+	print_pending_cells()
 	if(row_output) {
 		for(;pending_blank_rows;pending_blank_rows--) {
 			print "";
@@ -147,28 +152,47 @@ function warn(msg) {
 		for (;row_repeat;row_repeat--) {
 			printf("%s\n", row_output)
 		}
+	}
+}
+
+/^\/table:table-row$/ {
+	#Row delimiter
+	if(row_output) {
+		print_row()
 	}else{
 		pending_blank_rows+=row_repeat;
 	}
-
 	row_init()
+}
+
+function print_pending_cells() {
+	if(pending_cell_output) {
+		for(;pending_blank_cols;pending_blank_cols--) {
+			row_output=row_output "\t"
+		}
+		for(;col_repeat;col_repeat--) {
+			gsub(/\t/, " ")
+			#Its easier to just remove this trailing tab for the last field!
+			row_output=row_output cell_output "\t"
+		}
+		cell_output=""
+		pending_cell_output=0
+	}
 }
 
 /^\/table:table-row\/table:table-cell\/text/ {
 	gsub ("^/table:table-row/table:table-cell/text:p", "")
-	gsub ("^/.*", "")#Given nested tags (eg text:p/text:s) replace all with empty string
-	gsub ("^=", "")#Normal data cell. The data is left in $0
-	for(;pending_blank_cols;pending_blank_cols--) {
-		row_output=row_output "\t"
-	}
-	for(;col_repeat;col_repeat--) {
-		gsub(/\t/, " ")
-		#Its easier to just remove this trailing tab for the last field!
-		row_output=row_output $0 "\t"
-	}
+	gsub ("^/text:a=", "") ||           #Hyperlink URL
+		gsub ("^/text:s$", " ") ||  #Space
+		gsub ("^/.*", "") ||        #Given nested tags (eg text:p/text:s) replace all with empty string
+		gsub ("^=", "")             #Normal data cell. The data is left in $0
+
+	cell_output=cell_output $0
+	pending_cell_output=1
 }
 
 END {
+	if(correct_sheet) print_row();
 	if((already_found_correct_sheet!=1) && (!QUIET)) {
 		warn("Failed to find sheet named " SHEET)
 	}
